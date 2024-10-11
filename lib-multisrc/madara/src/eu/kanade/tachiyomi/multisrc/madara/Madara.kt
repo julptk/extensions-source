@@ -955,41 +955,48 @@ abstract class Madara(
 
     open val chapterProtectorSelector = "#chapter-protector-data"
 
-    override fun pageListParse(document: Document): List<Page> {
-        launchIO { countViews(document) }
+override fun pageListParse(document: Document): List<Page> {
+    launchIO { countViews(document) }
 
-        val chapterProtector = document.selectFirst(chapterProtectorSelector)
-            ?: return document.select(pageListParseSelector).mapIndexed { index, element ->
-                val imageUrl = element.selectFirst("img")?.let { imageFromElement(it) }
-                Page(index, document.location(), imageUrl)
+    val chapterProtector = document.selectFirst(chapterProtectorSelector)
+        ?: return document.select(pageListParseSelector).mapIndexed { index, element ->
+            val imageUrl = element.selectFirst("img")?.let { 
+                val originalUrl = imageFromElement(it)
+                "https://resize.sardo.work/?width=300&quality=75&imageUrl=$originalUrl"  // Tambahkan parameter resize
             }
-        val chapterProtectorHtml = chapterProtector.attr("src")
-            .takeIf { it.startsWith("data:text/javascript;base64,") }
-            ?.substringAfter("data:text/javascript;base64,")
-            ?.let { Base64.decode(it, Base64.DEFAULT).toString(Charsets.UTF_8) }
-            ?: chapterProtector.html()
-        val password = chapterProtectorHtml
-            .substringAfter("wpmangaprotectornonce='")
-            .substringBefore("';")
-        val chapterData = json.parseToJsonElement(
-            chapterProtectorHtml
-                .substringAfter("chapter_data='")
-                .substringBefore("';")
-                .replace("\\/", "/"),
-        ).jsonObject
-
-        val unsaltedCiphertext = Base64.decode(chapterData["ct"]!!.jsonPrimitive.content, Base64.DEFAULT)
-        val salt = chapterData["s"]!!.jsonPrimitive.content.decodeHex()
-        val ciphertext = salted + salt + unsaltedCiphertext
-
-        val rawImgArray = CryptoAES.decrypt(Base64.encodeToString(ciphertext, Base64.DEFAULT), password)
-        val imgArrayString = json.parseToJsonElement(rawImgArray).jsonPrimitive.content
-        val imgArray = json.parseToJsonElement(imgArrayString).jsonArray
-
-        return imgArray.mapIndexed { idx, it ->
-            Page(idx, document.location(), it.jsonPrimitive.content)
+            Page(index, document.location(), imageUrl)
         }
+
+    val chapterProtectorHtml = chapterProtector.attr("src")
+        .takeIf { it.startsWith("data:text/javascript;base64,") }
+        ?.substringAfter("data:text/javascript;base64,")
+        ?.let { Base64.decode(it, Base64.DEFAULT).toString(Charsets.UTF_8) }
+        ?: chapterProtector.html()
+
+    val password = chapterProtectorHtml
+        .substringAfter("wpmangaprotectornonce='")
+        .substringBefore("';")
+    val chapterData = json.parseToJsonElement(
+        chapterProtectorHtml
+            .substringAfter("chapter_data='")
+            .substringBefore("';")
+            .replace("\\/", "/"),
+    ).jsonObject
+
+    val unsaltedCiphertext = Base64.decode(chapterData["ct"]!!.jsonPrimitive.content, Base64.DEFAULT)
+    val salt = chapterData["s"]!!.jsonPrimitive.content.decodeHex()
+    val ciphertext = salted + salt + unsaltedCiphertext
+
+    val rawImgArray = CryptoAES.decrypt(Base64.encodeToString(ciphertext, Base64.DEFAULT), password)
+    val imgArrayString = json.parseToJsonElement(rawImgArray).jsonPrimitive.content
+    val imgArray = json.parseToJsonElement(imgArrayString).jsonArray
+
+    return imgArray.mapIndexed { idx, it ->
+        val originalUrl = it.jsonPrimitive.content
+        val resizedImageUrl = "https://resize.sardo.work/?width=300&quality=75&imageUrl=$originalUrl"  // Tambahkan parameter resize
+        Page(idx, document.location(), resizedImageUrl)
     }
+}
 
     override fun imageRequest(page: Page): Request {
         return GET(page.imageUrl!!, headers.newBuilder().set("Referer", page.url).build())
