@@ -137,11 +137,15 @@ class KomikCast : MangaThemesia("Komik Cast", "https://komikcast.cz", "id", "/da
         }
     }
 
-    override fun pageListParse(document: Document): List<Page> {
-        return document.select("div#chapter_body .main-reading-area img.size-full")
-            .distinctBy { img -> img.imgAttr() }
-            .mapIndexed { i, img -> Page(i, document.location(), img.imgAttr()) }
-    }
+override fun pageListParse(document: Document): List<Page> {
+    return document.select("div#chapter_body .main-reading-area img.size-full")
+        .distinctBy { img -> img.imgAttr() }
+        .mapIndexed { i, img -> 
+            val imageUrl = img.imgAttr()  // Ambil URL gambar asli
+            val resizedImageUrl = "https://resize.sardo.work/?width=300&quality=75&imageUrl=$imageUrl"  // Tambahkan parameter resize
+            Page(i, document.location(), resizedImageUrl)  // Gunakan URL yang di-resize
+        }
+}
 
     override val hasProjectPage: Boolean = true
     override val projectPageString = "/project-list"
