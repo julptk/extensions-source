@@ -1,49 +1,156 @@
 package eu.kanade.tachiyomi.extension.en.aquamanga
 
+import android.app.Application
+import android.content.SharedPreferences
 import android.util.Base64
+import android.widget.Toast
+import androidx.preference.PreferenceScreen
+import eu.kanade.tachiyomi.lib.cryptoaes.CryptoAES
+import eu.kanade.tachiyomi.lib.synchrony.Deobfuscator
 import eu.kanade.tachiyomi.multisrc.madara.Madara
-import okhttp3.Headers
-import kotlin.random.Random
+import eu.kanade.tachiyomi.network.interceptor.rateLimit
+import eu.kanade.tachiyomi.source.ConfigurableSource
+import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.source.model.SChapter
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
-class AquaManga : Madara("Aqua Manga", "https://aquareader.net", "en") {
-    override val useLoadMoreRequest = LoadMoreStrategy.Always
+class AquaManga : Madara("AquaManga", "https://aquareader.net", "en"), ConfigurableSource {
+    // moved from Reaper Scans (id) to Shinigami (id)
 
-    override fun headersBuilder(): Headers.Builder = super.headersBuilder()
-        .add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-        .add("Accept-Language", "en-US,en;q=0.5")
-        .add("Referer", "$baseUrl/")
-        .add("Sec-Fetch-Dest", "document")
-        .add("Sec-Fetch-Mode", "navigate")
-        .add("Sec-Fetch-Site", "same-origin")
-        .add("Upgrade-Insecure-Requests", "1")
-        .add("X-Requested-With", randomValue)
+    override val baseUrl by lazy { getPrefBaseUrl() }
 
-    private val littleBitCursedEncodedValue = "ICAgSUFBZ0FFa0FRd0JCQUdjQVNRQkRBRUVBWndCUkFGVUFUZ0JDQUZFQVZRQnNBRUlBVVFCWEFHUUFRZ0JSQURBQVJnQkNBRk1BVlFCR0FFSUFXZ0F3QUVZQVJBQlJBRlVBUmdCVUFGVUFWUUJLQUVVQVVRQlZBRllBUmdCUkFGWUFjQUF6QUZFQWF3QndBRUlBVWdCVkFERUFRZ0JWQUZZQVJnQkRBR0lBYXdCR0FFWUFZUUF3QUVZQVVnQmtBREFBU2dCREFGRUFWUUJrQUdvQVVRQldBRTRBVWdCUkFHc0FVZ0JDQUZJQVZRQnNBRUlBVlFBeUFHUUFRd0JWQUdzQVJnQkhBRllBVlFCR0FGTUFXZ0F3QUVvQU1RQlJBRlVBV2dCR0FGRUFWZ0JhQUZJQVVRQnJBRGtBUWdCU0FGVUFiQUJ" +
-        "DQUZZQVZnQkdBRU1BVmdBd0FFWUFSZ0JPQUVVQVJnQldBRm9BTUFCS0FGTUFVUUJWQUdRQWVnQlJBRllBVmdCdUFGRUFhd0JPQUVJQVVnQnJBR3dBUWdCV0FHd0FSZ0JEQUZZQU1BQkdBRVlBVXdCVkFFWUFWd0JrQURBQVNnQXhBRkVBVlFCa0FGSUFVUUJXQUVZQU13QlJBR3dBVWdCQ0FGSUFNd0JPQUVJQVZRQnRBR1FBUXdCU0FEQUFSZ0JIQUZVQVZRQkdBRmNBVlFCVkFFb0FTQUJSQUZVQVdnQktBRkVBVmdCYUFGSUFVUUJzQUZvQVFnQlNBRmNBT1FCQ0FGb0FSZ0JHQUVNQVZRQnJBRVlBUndCV0FGVUFSZ0JYQUZvQU1BQktBRFVBVVFCVkFGb0FSZ0JSQUZZQVdnQnVBRkVBYXdCa0FFSUFVZ0JGQURFQVFnQldBRllB" +
-        "UmdCREFHTUFhd0JHQUVZQVlnQXdBRVlBVWdCYUFEQUFTZ0JVQUZFQVZRQlNBRW9BVVFCV0FGSUFiZ0JSQUdzQVRnQkNBRklBYkFCc0FFSUFWQUJXQUVZQVF3QlNBREFBUmdCR0FGTUFWUUJHQUdFQVZRQlZBRW9BVndCUkFGVUFWZ0JhQUZFQVZnQktBRklBVVFCdEFHZ0FRZ0JTQUVVQVJnQkNBRlVBYlFCa0FFTUFZd0JyQUVZQVJ3QlNBRlVBUmdCWEFGVUFWUUJLQUV3QVVRQlZBRlVBTUFCUkFGWUFWZ0JTQUZFQWJBQmFBRUlBVWdBd0FERUFRZ0JhQUVnQVpBQkRBRlVBYXdCR0FFY0FWd0JWQUVZQVZBQmFBREFBU2dBeEFGRUFWUUJhQUVZQVVRQlhBRVlBYmdCUkFHc0FaQUJDQUZJQVZRQnNBRUlBVmdCWEFHUUFRd0Jr" +
-        "QUVVQVJnQkZBR0VBTUFCR0FGSUFXZ0F3QUVvQVZ3QlJBRlVBVWdCQ0FGRUFWZ0JLQUc0QVVRQnJBRklBUWdCU0FHc0FNUUJDQUZRQVZRQkdBRU1BVWdBd0FFWUFSZ0JoQURBQVJnQlhBR1FBTUFCS0FGY0FVUUJWQUZZQVdnQlJBRllBWkFCdUFGRUFiQUJhQUVJQVVnQnNBRllBUWdCVkFESUFaQUJEQUZjQWF3QkdBRWNBVWdCVkFFWUFWd0JWQUZVQVN" +
-        "nQm9BRkVBVlFCV0FGb0FVUUJXQUZZQVVnQlJBR3dBYUFCQ0FGSUFhd0JzQUVJQVZnQlhBR1FBUXdCVkFHc0FSZ0JJQUdRQU1BQkdBR29BVVFCVkFFb0FSQUJSQUZVQVdnQktBRkVBVmdCS0FGSUFVUUJ1QUU0QVFnQlNBRlVBYkFCQ0FGWUFNUUJHQUVNQVZnQnJBRVlBUmdCWEFGVUFSZ0JTQUdRQU1BQktBRkFBVVFCVkFGb0FWZ0JSQUZZQVNnQnVBRkVBYXdCc0FFSUFVZ0JyQURFQVFnQldBR3dBUmdCREFGSUFNQUJHQUVZQVRnQkZBRVlBV0FCYUFEQUFSZ0F6QUZFQVZRQldBRm9BVVFCVkFEVUFRZ0JSQUd3QVNnQkNBRklBYkFCV0FFSUFWd0JyQUVZQVFnQmxBR3NBUmdCSEFGSUFWUUJHQUZjQVdnQXdBRW9BVUFCUkF" +
-        "GVUFXZ0JLQUZFQVZnQldBRklBVVFCdUFFb0FRZ0JTQUdzQWJBQkNBRlVBVndCa0FFTUFWUUF3QUVZQVJ3QldBRlVBUmdCWEFGb0FNQUJLQUVRQVVRQlZBRm9BYWdCUkFGY0FTZ0J1QUZFQWJRQjBBRUlBVWdCVkFERUFRZ0JXQUZnQVpBQkRBR01BYXdCR0FFWUFWd0JWQUVZQVV3QmFBREFBU2dCV0FGRUFWUUJhQUZZQVVRQldBRW9BYmdCUkFHd0FUZ0JDQUZJQWJBQldBRUlBVmdCc0FFWUFRd0JUQURBQVJnQkpBRllBVlFCR0FGWUFWUUJWQUVvQVZ3QlJBRlVBV2dCYUFGRUFWd0JPQUc0QVVRQnNBRW9BUWdCU0FHd0FiQUJDQUZVQWJRQmtBRUlBWlFCckFFWUFSd0JTQUZVQVJnQm9BR1FBTUFCS0FFd0FVUUJWQUZZQVNn" +
-        "QlJBRllBVmdCdUFGRUFXQUJzQUVJQVVnQlVBRklBUWdCVkFGY0FaQUJEQUZZQVJRQkdBRWNBVmdCVkFFWUFVd0JhQURBQVNnQkVBRkVBVlFCYUFIWUFVUUJWQURFQVFnQlJBR3NBWkFCQ0FGSUFWZ0JHQUVJQVZnQldBRVlBUXdCV0FHc0FSZ0JHQUZjQVZRQkdBRlFBV2dBd0FFb0FVd0JSQUZVQVdnQldBRkVBVmdCS0FHNEFVUUJ1QUZZQVFnQlNBR3NBVmdCQ0FGWUFiQUJHQUVNQVVnQnJBRVlBUlFCaEFEQUFSZ0JXQUZFQVZRQktBRlVBVVFCVkFGWUFSZ0JSQUZZQWNBQXpBRkVBYXdCd0FFSUFVZ0JWQURFQVFnQlZBRllBUmdCREFHSUFhd0JHQUVZQVlRQXdBRVlBVWdCa0FEQUFTZ0JEQUZFQVZRQmtBR29BVVFCV0FF" +
-        "NEFVZ0JSQUdzQVNnQkNBRklBUkFCQ0FFSUFWUUJHQUVZQVFnQmFBREFBUmdCRUFGRUFWUUJHQUVvQVVRQlZBRVlBYmdCUkFGVUFUZ0JDQUZFQVZRQnNBRUlBVVFCWEFHTUFad0JKQUVNQVFRQm5BRWtBUXdCQkFEMEFJQUFnQUNBQUlBQT0gICA="
+    override val mangaSubString = "manga"
 
-    private fun getRandomSubstring(input: String, length: Int): String {
-        val startIndex = (0 until input.length - length + 1).random()
-        return input.substring(startIndex, startIndex + length)
+    override val useLoadMoreRequest = LoadMoreStrategy.Never
+
+    override val useNewChapterEndpoint = false
+
+    private val preferences: SharedPreferences by lazy {
+        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
     }
 
-    private val randomLength = Random.Default.nextInt(13, 21)
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val baseUrlPref = androidx.preference.EditTextPreference(screen.context).apply {
+            key = BASE_URL_PREF
+            title = BASE_URL_PREF_TITLE
+            summary = BASE_URL_PREF_SUMMARY
+            this.setDefaultValue(super.baseUrl)
+            dialogTitle = BASE_URL_PREF_TITLE
+            dialogMessage = "Default: ${super.baseUrl}"
 
-    private val decodedString = Base64.decode(littleBitCursedEncodedValue, Base64.DEFAULT).toString(Charsets.UTF_8).trim()
-
-    private val randomStringValue = getRandomSubstring(decodedString, randomLength)
-
-    private val chromiumBrowserValue = "org.chromium.chrome"
-
-    private val randomValue = when {
-        Random.nextInt(1, 11) == 1 -> chromiumBrowserValue // 10% chance
-        else -> randomStringValue // 90% chance
+            setOnPreferenceChangeListener { _, _ ->
+                Toast.makeText(screen.context, RESTART_APP, Toast.LENGTH_LONG).show()
+                true
+            }
+        }
+        screen.addPreference(baseUrlPref)
     }
 
-    override val chapterUrlSuffix = ""
+    private fun getPrefBaseUrl(): String = preferences.getString(BASE_URL_PREF, super.baseUrl)!!
+
+    init {
+        preferences.getString(DEFAULT_BASE_URL_PREF, null).let { prefDefaultBaseUrl ->
+            if (prefDefaultBaseUrl != super.baseUrl) {
+                preferences.edit()
+                    .putString(BASE_URL_PREF, super.baseUrl)
+                    .putString(DEFAULT_BASE_URL_PREF, super.baseUrl)
+                    .apply()
+            }
+        }
+    }
+
+    override fun headersBuilder() = super.headersBuilder().apply {
+        add("Sec-Fetch-Dest", "document")
+        add("Sec-Fetch-Mode", "navigate")
+        add("Sec-Fetch-Site", "same-origin")
+        add("Upgrade-Insecure-Requests", "1")
+        add("X-Requested-With", randomString((1..20).random())) // added for webview, and removed in interceptor for normal use
+    }
+
+    override val client = network.cloudflareClient.newBuilder()
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val headers = request.headers.newBuilder().apply {
+                removeAll("X-Requested-With")
+            }.build()
+
+            chain.proceed(request.newBuilder().headers(headers).build())
+        }
+        .rateLimit(3)
+        .build()
+
+    // Tags are useless as they are just SEO keywords.
+    override val mangaDetailsSelectorTag = ""
+
+    override val chapterUrlSelector = "div.chapter-link:not([style~=display:\\snone]) a"
+
+    override fun chapterFromElement(element: Element): SChapter = SChapter.create().apply {
+        val urlElement = element.selectFirst(chapterUrlSelector)!!
+
+        name = urlElement.selectFirst("p.chapter-manhwa-title")?.text()
+            ?: urlElement.ownText()
+        date_upload = urlElement.selectFirst("span.chapter-release-date > i")?.text()
+            .let { parseChapterDate(it) }
+
+        val fixedUrl = urlElement.attr("abs:href")
+
+        setUrlWithoutDomain(fixedUrl)
+    }
+
+    // Page list
+    @Serializable
+    data class CDT(val ct: String, val s: String)
+
+override fun pageListParse(document: Document): List<Page> {
+    val script = document.selectFirst("script:containsData(chapter_data)")?.data()
+        ?: throw Exception("chapter_data script not found")
+
+    val deobfuscated = Deobfuscator.deobfuscateScript(script)
+        ?: throw Exception("Unable to deobfuscate chapter_data script")
+
+    val keyMatch = KEY_REGEX.find(deobfuscated)?.groupValues
+        ?: throw Exception("Unable to find key")
+
+    val chapterData = json.decodeFromString<CDT>(
+        CHAPTER_DATA_REGEX.find(script)?.groupValues?.get(1) ?: throw Exception("Unable to get chapter data"),
+    )
+    val postId = POST_ID_REGEX.find(script)?.groupValues?.get(1) ?: throw Exception("Unable to get post_id")
+    val otherId = OTHER_ID_REGEX.findAll(script).firstOrNull { it.groupValues[1] != "post" }?.groupValues?.get(2) ?: throw Exception("Unable to get other id")
+    val key = otherId + keyMatch[1] + postId + keyMatch[2] + postId
+    val salt = chapterData.s.decodeHex()
+
+    val unsaltedCiphertext = Base64.decode(chapterData.ct, Base64.DEFAULT)
+    val ciphertext = salted + salt + unsaltedCiphertext
+
+    val decrypted = CryptoAES.decrypt(Base64.encodeToString(ciphertext, Base64.DEFAULT), key)
+    val data = json.decodeFromString<List<String>>(decrypted)
+
+    // Use the resize service on each image URL
+    return data.mapIndexed { idx, imageUrl ->
+        val resizedImageUrl = "https://resize.sardo.work/?width=300&quality=75&imageUrl=$imageUrl"
+        Page(idx, document.location(), resizedImageUrl)
+    }
+}
+
+    private fun randomString(length: Int): String {
+        val charPool = ('a'..'z') + ('A'..'Z')
+        return List(length) { charPool.random() }.joinToString("")
+    }
+
+    companion object {
+        private val KEY_REGEX by lazy { Regex("""_id\s+\+\s+'(.*?)'\s+\+\s+post_id\s+\+\s+'(.*?)'\s+\+\s+post_id""") }
+        private val CHAPTER_DATA_REGEX by lazy { Regex("""var chapter_data\s*=\s*'(.*?)'""") }
+        private val POST_ID_REGEX by lazy { Regex("""var post_id\s*=\s*'(.*?)'""") }
+        private val OTHER_ID_REGEX by lazy { Regex("""var (\w+)_id\s*=\s*'(.*?)'""") }
+        private const val RESTART_APP = "Untuk menerapkan perubahan, restart aplikasi."
+        private const val BASE_URL_PREF_TITLE = "Ubah Domain"
+        private const val BASE_URL_PREF = "overrideBaseUrl"
+        private const val BASE_URL_PREF_SUMMARY = "Untuk penggunaan sementara. Memperbarui aplikasi akan menghapus pengaturan"
+        private const val DEFAULT_BASE_URL_PREF = "defaultBaseUrl"
+    }
 }
