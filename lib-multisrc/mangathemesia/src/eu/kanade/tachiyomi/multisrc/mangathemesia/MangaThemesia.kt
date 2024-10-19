@@ -1,4 +1,4 @@
-package eu.kanade.tachiyomi.multisrc.mangathemesi
+package eu.kanade.tachiyomi.multisrc.mangathemesia
 
 import eu.kanade.tachiyomi.lib.i18n.Intl
 import eu.kanade.tachiyomi.network.GET
