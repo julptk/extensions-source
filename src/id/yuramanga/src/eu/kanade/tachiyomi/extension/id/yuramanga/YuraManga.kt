@@ -24,6 +24,7 @@ class YuraManga : ZManga(
             }
             response
         }
+        .rateLimit(2, 1)
         .build()
 
     override fun pageListParse(document: Document): List<Page> {
