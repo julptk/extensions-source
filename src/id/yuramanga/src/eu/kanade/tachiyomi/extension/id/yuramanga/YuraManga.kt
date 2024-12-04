@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.extension.id.yuramanga
 import eu.kanade.tachiyomi.multisrc.zmanga.ZManga
 import eu.kanade.tachiyomi.source.model.Page
 import org.jsoup.nodes.Document
+import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
